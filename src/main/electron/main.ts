@@ -1634,7 +1634,7 @@ function setupMenu() {
   const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
     {
       role: isMac ? "appMenu" : undefined,
-      label: isMac ? "" : "App",
+      label: isMac ? "" : "Core App",
       submenu: [
         {
           label: "About AdvantageScope",
@@ -2206,7 +2206,7 @@ function setupMenu() {
 /** Creates the "About AdvantageScope" window. */
 function createAboutWindow() {
   let detailLines: string[] = [];
-  detailLines.push("Version: " + (app.isPackaged ? app.getVersion() : "Development"));
+  detailLines.push("Version: " + (app.isPackaged ? app.getVersion() : "Development MA"));
   detailLines.push("Distribution: " + (DISTRIBUTION === Distribution.WPILib ? "WPILib" : "FRC 6328"));
   detailLines.push("Platform: " + process.platform + "-" + process.arch);
   detailLines.push("Build Date: " + BUILD_DATE);

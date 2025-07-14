@@ -169,6 +169,7 @@ export class HistoricalDataSource {
 
         case "failed":
           this.setStatus(HistoricalDataSourceStatus.Error);
+          console.log(event.data);
           return; // Exit immediately
 
         case "fields":

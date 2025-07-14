@@ -388,12 +388,12 @@ function startHistorical(path: string, clear = true, merge = false) {
           setWindowTitle(logFriendlyName, "Error");
           sourceEntry.progress = null;
           updateLoading();
-          let message = "There was a problem while reading the log file. Please try again.";
+          let message = "Hi";
           if (source.getCustomError() !== null) {
             message = source.getCustomError()!;
           }
           window.sendMainMessage("error", {
-            title: "Failed to open log",
+            title: "TEST5",
             content: message
           });
           break;

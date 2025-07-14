@@ -15,6 +15,7 @@ export class NT4Publisher {
   private PERIOD = 0.02;
 
   private client: NT4_Client;
+  private replayPrefix: string;
   private statusCallback: (status: NT4PublisherStatus) => void;
   private interval: number | null = null;
   private stopped = false;
@@ -22,6 +23,8 @@ export class NT4Publisher {
 
   constructor(isSim: boolean, statusCallback: (status: NT4PublisherStatus) => void) {
     this.statusCallback = statusCallback;
+
+    this.replayPrefix = isSim ? "/Replay" : "";
 
     // Get address
     let address = "";
@@ -122,7 +125,9 @@ export class NT4Publisher {
             type = "int[]";
           }
         }
-        this.client.publishTopic(topic.slice(3), type);
+        const baseKey = topic.slice(3);
+        const publishKey = `${this.replayPrefix}${baseKey}`;
+        this.client.publishTopic(publishKey, type);
         this.publishedTopics[topic] = null;
       }
     });
@@ -178,7 +183,9 @@ export class NT4Publisher {
       if (hasChanged) {
         this.publishedTopics[topic] = value;
         if (value !== null) {
-          this.client.addTimestampedSample(topic.slice(3), serverTime!, value);
+          const baseKey = topic.slice(3);
+          const publishKey = `${this.replayPrefix}${baseKey}`;
+          this.client.addTimestampedSample(publishKey, serverTime!, value);
         }
       }
     });
