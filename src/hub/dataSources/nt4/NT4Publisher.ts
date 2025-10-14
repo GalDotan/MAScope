@@ -24,7 +24,7 @@ export class NT4Publisher {
   constructor(isSim: boolean, statusCallback: (status: NT4PublisherStatus) => void) {
     this.statusCallback = statusCallback;
 
-    this.replayPrefix = isSim ? "/Replay" : "";
+    this.replayPrefix = isSim ? "/Replay/" : "";
 
     // Get address
     let address = "";
