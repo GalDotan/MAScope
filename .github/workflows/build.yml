@@ -25,8 +25,6 @@ jobs:
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
-        env:
-          ASCOPE_NO_FFMPEG: true
       - name: Check formatting
         run: npm run check-format
 
@@ -44,8 +42,6 @@ jobs:
           cache: "npm"
       - name: Install Node.js dependencies
         run: npm ci
-        env:
-          ASCOPE_NO_FFMPEG: true
       - name: Build docs
         run: npm run docs:build
       - name: Upload artifact
@@ -69,11 +65,9 @@ jobs:
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.74
+          version: 4.0.12
       - name: Install Node.js dependencies
         run: npm ci
-        env:
-          ASCOPE_NO_FFMPEG: true
       - name: Compile WebAssembly
         run: npm run wasm:compile
       - name: Compile bundles
@@ -100,10 +94,10 @@ jobs:
           cache: "npm"
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.12
       - name: Install Node.js dependencies
         run: npm ci
-        env:
-          ASCOPE_NO_FFMPEG: true
       - name: Compile WebAssembly
         run: npm run wasm:compile
       - name: Compile bundles
@@ -133,11 +127,9 @@ jobs:
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
-          version: 3.1.74
+          version: 4.0.12
       - name: Install Node.js dependencies
         run: npm ci
-        env:
-          ASCOPE_NO_FFMPEG: true
       - name: Compile WebAssembly
         run: npm run wasm:compile
       - name: Compile bundles
@@ -159,9 +151,9 @@ jobs:
         with:
           name: advantagescopelite-desktop
           path: advantagescopelite-desktop/
-      - name: Build IPK (SystemCore)
+      - name: Build IPK (Systemcore)
         run: cd lite/ipk && ./build.sh
-      - name: Upload development artifact (SystemCore)
+      - name: Upload development artifact (Systemcore)
         uses: actions/upload-artifact@v4
         with:
           name: advantagescopelite-systemcore
@@ -169,11 +161,15 @@ jobs:
 
   build-ios:
     name: Build for iOS
-    runs-on: macos-15
+    runs-on: macos-26
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Install Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+      - name: Download iOS simulator
+        run: xcodebuild -downloadPlatform iOS
       - name: Build AdvantageScopeXR
         run: xcodebuild -project xr/AdvantageScopeXR.xcodeproj -scheme AdvantageScopeXR -sdk iphonesimulator build
       - name: Build AdvantageScopeXRClip

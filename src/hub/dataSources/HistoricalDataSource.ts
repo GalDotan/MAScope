@@ -28,7 +28,9 @@ export class HistoricalDataSource {
     ".wpilog": "hub$wpilogWorker.js",
     ".hoot": "hub$wpilogWorker.js", // Converted to WPILOG by main process
     ".dslog": "hub$dsLogWorker.js",
-    ".dsevents": "hub$dsLogWorker.js"
+    ".dsevents": "hub$dsLogWorker.js",
+    ".log": "hub$roadRunnerWorker.js",
+    ".csv": "hub$csvWorker.js"
   };
 
   private path = "";
@@ -121,8 +123,8 @@ export class HistoricalDataSource {
     this.customError = data.error;
     let fileContents: (Uint8Array | null)[] = data.files;
 
-    // Check for read error (at least one file is all null)
-    if (!fileContents.every((buffer) => buffer !== null)) {
+    // Check for read error (all files are null)
+    if (fileContents.every((buffer) => buffer === null)) {
       this.setStatus(HistoricalDataSourceStatus.Error);
       return;
     }
@@ -145,7 +147,7 @@ export class HistoricalDataSource {
     };
     this.worker.postMessage(
       request,
-      (fileContents as Uint8Array[]).map((array) => array.buffer)
+      fileContents.map((array) => (array === null ? new ArrayBuffer(0) : array.buffer))
     );
 
     // Process response

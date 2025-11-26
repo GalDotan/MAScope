@@ -38,7 +38,7 @@ import { ensureThemeContrast } from "../../shared/Colors";
 import ExportOptions from "../../shared/ExportOptions";
 import LineGraphFilter from "../../shared/LineGraphFilter";
 import NamedMessage from "../../shared/NamedMessage";
-import Preferences, { DEFAULT_PREFS, mergePreferences } from "../../shared/Preferences";
+import Preferences, { DEFAULT_PREFS, getLiveModeName, LiveMode, mergePreferences } from "../../shared/Preferences";
 import { SourceListConfig, SourceListItemState, SourceListTypeMemory } from "../../shared/SourceListConfig";
 import TabType, { getAllTabTypes, getDefaultTabTitle, getTabAccelerator, getTabIcon } from "../../shared/TabType";
 import { BUILD_DATE, COPYRIGHT, DISTRIBUTION, Distribution } from "../../shared/buildConstants";
@@ -55,11 +55,6 @@ import {
   FRC_LOG_FOLDER,
   HUB_DEFAULT_HEIGHT,
   HUB_DEFAULT_WIDTH,
-  PATHPLANNER_CONNECT_TIMEOUT_MS,
-  PATHPLANNER_DATA_TIMEOUT_MS,
-  PATHPLANNER_PING_DELAY_MS,
-  PATHPLANNER_PING_TEXT,
-  PATHPLANNER_PORT,
   PREFS_FILENAME,
   RECENT_UNITS_FILENAME,
   RLOG_CONNECT_TIMEOUT_MS,
@@ -78,7 +73,16 @@ import { XRControls } from "./XRControls";
 import { XRServer } from "./XRServer";
 import { getAssetDownloadStatus, startAssetDownloadLoop } from "./assetDownloader";
 import { createAssetFolders, getUserAssetsPath, loadAssets } from "./assetLoader";
-import { isAlpha, isBeta, isBetaExpired, isBetaWelcomeComplete, saveBetaWelcomeComplete } from "./betaUtil";
+import {
+  delayBetaSurvey,
+  isAlpha,
+  isBeta,
+  isBetaExpired,
+  isBetaWelcomeComplete,
+  openBetaSurvey,
+  saveBetaWelcomeComplete,
+  shouldPromptBetaSurvey
+} from "./betaUtil";
 import { getOwletDownloadStatus, startOwletDownloadLoop } from "./owletDownloadLoop";
 import { checkHootIsPro, convertHoot, CTRE_LICENSE_URL } from "./owletInterface";
 
@@ -92,6 +96,7 @@ let windowPorts: { [id: number]: MessagePortMain } = {};
 let hubTouchBarSliders: { [id: number]: TouchBarSlider } = {};
 let hubExportingIds: Set<number> = new Set();
 let ctreLicensePrompt: Promise<void> | null = null;
+let menuTemplate: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] | null = null;
 
 let stateTracker = new StateTracker();
 let updateChecker = new UpdateChecker();
@@ -110,11 +115,6 @@ XRServer.assetsSupplier = () => advantageScopeAssets;
 let rlogSockets: { [id: number]: net.Socket } = {};
 let rlogSocketTimeouts: { [id: number]: NodeJS.Timeout } = {};
 let rlogDataArrays: { [id: number]: Uint8Array } = {};
-
-// PathPlanner variables
-let pathPlannerSockets: { [id: number]: net.Socket } = {};
-let pathPlannerSocketTimeouts: { [id: number]: NodeJS.Timeout } = {};
-let pathPlannerDataStrings: { [id: number]: string } = {};
 
 // Download variables
 let downloadClient: FTPClient | null = null;
@@ -161,6 +161,20 @@ function sendAllPreferences() {
     });
   });
   if (downloadWindow !== null && !downloadWindow.isDestroyed()) sendMessage(downloadWindow, "set-preferences", data);
+  if (menuTemplate !== null) {
+    let autoString = "Default: " + getLiveModeName(data.liveMode);
+    (
+      (menuTemplate[1].submenu as Electron.MenuItemConstructorOptions[])[2]
+        .submenu as Electron.MenuItemConstructorOptions[]
+    )[0].label = autoString;
+    (
+      (menuTemplate[1].submenu as Electron.MenuItemConstructorOptions[])[3]
+        .submenu as Electron.MenuItemConstructorOptions[]
+    )[0].label = autoString;
+    (menuTemplate[0].submenu as Electron.MenuItemConstructorOptions[])[7].checked = data.userAssetsFolder !== null;
+    let menu = Menu.buildFromTemplate(menuTemplate);
+    Menu.setApplicationMenu(menu);
+  }
 }
 
 /** Sends the current set of assets to all windows. */
@@ -413,22 +427,49 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
       break;
 
     case "numeric-array-deprecation-warning":
-      let shouldForce: boolean = message.data.force;
-      let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
-      if (!shouldForce && prefs.skipNumericArrayDeprecationWarning) return;
-      if (!prefs.skipNumericArrayDeprecationWarning) {
-        prefs.skipNumericArrayDeprecationWarning = true;
-        jsonfile.writeFileSync(PREFS_FILENAME, prefs);
-        sendAllPreferences();
+      {
+        let shouldForce: boolean = message.data.force;
+        let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
+        if (!shouldForce && prefs.skipNumericArrayDeprecationWarning) return;
+        if (!prefs.skipNumericArrayDeprecationWarning) {
+          prefs.skipNumericArrayDeprecationWarning = true;
+          jsonfile.writeFileSync(PREFS_FILENAME, prefs);
+          sendAllPreferences();
+        }
+        dialog.showMessageBox(window, {
+          type: "info",
+          title: "Alert",
+          message: "Deprecated data format",
+          detail:
+            "The legacy numeric array format for structured data is deprecated and will be removed in 2027. Check the AdvantageScope documentation for details on migrating to a modern alternative.",
+          icon: WINDOW_ICON
+        });
       }
-      dialog.showMessageBox(window, {
-        type: "info",
-        title: "Alert",
-        message: "Deprecated data format",
-        detail:
-          "The legacy numeric array format for structured data is deprecated and will be removed in 2027. Check the AdvantageScope documentation for details on migrating to a modern alternative.",
-        icon: WINDOW_ICON
-      });
+      break;
+
+    case "ftc-experimental-warning":
+      {
+        let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
+        if (prefs.skipFTCExperimentalWarning) return;
+        dialog
+          .showMessageBox(window, {
+            type: "info",
+            title: "Alert",
+            message: "Experimental Feature",
+            detail:
+              "Support for FTC fields in AdvantageScope is an experimental feature, and may not function properly in all cases. Please report any problems via the GitHub issues page.",
+            buttons: ["OK"],
+            checkboxLabel: "Don't Show Again",
+            icon: WINDOW_ICON
+          })
+          .then((response) => {
+            if (response.checkboxChecked) {
+              prefs.skipFTCExperimentalWarning = true;
+              jsonfile.writeFileSync(PREFS_FILENAME, prefs);
+              sendAllPreferences();
+            }
+          });
+      }
       break;
 
     case "live-rlog-start":
@@ -497,57 +538,33 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
       rlogSockets[windowId]?.destroy();
       break;
 
-    case "live-pathplanner-start":
-      pathPlannerSockets[windowId]?.destroy();
-      pathPlannerSockets[windowId] = net.createConnection({
-        host: message.data.address,
-        port: PATHPLANNER_PORT
-      });
-
-      pathPlannerSockets[windowId].setTimeout(PATHPLANNER_CONNECT_TIMEOUT_MS, () => {
-        sendMessage(window, "live-data", { uuid: message.data.uuid, status: false });
-      });
-
-      const textDecoder = new TextDecoder();
-      pathPlannerDataStrings[windowId] = "";
-      pathPlannerSockets[windowId].on("data", (data) => {
-        pathPlannerDataStrings[windowId] += textDecoder.decode(data);
-        if (pathPlannerSocketTimeouts[windowId] !== null) clearTimeout(pathPlannerSocketTimeouts[windowId]);
-        pathPlannerSocketTimeouts[windowId] = setTimeout(() => {
-          pathPlannerSockets[windowId]?.destroy();
-        }, PATHPLANNER_DATA_TIMEOUT_MS);
-
-        while (pathPlannerDataStrings[windowId].includes("\n")) {
-          let newLineIndex = pathPlannerDataStrings[windowId].indexOf("\n");
-          let line = pathPlannerDataStrings[windowId].slice(0, newLineIndex);
-          pathPlannerDataStrings[windowId] = pathPlannerDataStrings[windowId].slice(newLineIndex + 1);
-
-          let success = sendMessage(window, "live-data", {
-            uuid: message.data.uuid,
-            success: true,
-            string: line
-          });
-          if (!success) {
-            pathPlannerSockets[windowId]?.destroy();
-          }
-        }
-      });
-
-      pathPlannerSockets[windowId].on("error", () => {
-        sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
-      });
-
-      pathPlannerSockets[windowId].on("close", () => {
-        sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
-      });
-      break;
-
-    case "live-pathplanner-stop":
-      pathPlannerSockets[windowId]?.destroy();
-      break;
-
     case "open-link":
       shell.openExternal(message.data);
+      break;
+
+    case "ask-open-sidebar-context-menu":
+      const fieldCopyMenu = new Menu();
+      fieldCopyMenu.append(
+        new MenuItem({
+          label: `Copy "${message.data.title}" to clipboard`,
+          click() {
+            clipboard.writeText(message.data.title);
+          }
+        })
+      );
+      fieldCopyMenu.append(
+        new MenuItem({
+          label: `Copy "${message.data.fullTitle}" to clipboard`,
+          click() {
+            clipboard.writeText(message.data.fullTitle);
+          }
+        })
+      );
+      fieldCopyMenu.popup({
+        window: window,
+        x: Math.round(message.data.position[0]),
+        y: Math.round(message.data.position[1])
+      });
       break;
 
     case "open-app-menu":
@@ -604,8 +621,8 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
       const rect: ButtonRect = message.data.rect;
       playbackOptionsMenu.popup({
         window: window,
-        x: rect.x + rect.width,
-        y: rect.y
+        x: Math.round(rect.x + rect.width),
+        y: Math.round(rect.y)
       });
       break;
 
@@ -842,7 +859,10 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
         } else {
           // Left and right controls
           let lockedRange: [number, number] | null = message.data.lockedRange;
-          let unitConversion: Units.UnitConversionPreset = message.data.unitConversion;
+          let autoUnitGroup: string | "none" | "inconsistent" = message.data.autoUnitGroup;
+          let autoUnitSelected: string | null = message.data.autoUnitSelected;
+          let autoUnitDefault: string | null = message.data.autoUnitDefault;
+          let unitConversion: Units.UIUnitOptions = message.data.unitConversion;
           let filter: LineGraphFilter = message.data.filter;
 
           editAxisMenu.append(
@@ -881,6 +901,48 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
               type: "separator"
             })
           );
+          switch (autoUnitGroup) {
+            case "none":
+              editAxisMenu.append(
+                new MenuItem({
+                  label: "(No Unit Metadata)",
+                  enabled: false
+                })
+              );
+              break;
+
+            case "inconsistent":
+              editAxisMenu.append(
+                new MenuItem({
+                  label: "(Inconsistent Units)",
+                  enabled: false
+                })
+              );
+              break;
+
+            default:
+              Object.keys(Units.UNIT_GROUPS[autoUnitGroup]).forEach((unit) => {
+                editAxisMenu.append(
+                  new MenuItem({
+                    label:
+                      unit.charAt(0).toUpperCase() + unit.slice(1) + (unit === autoUnitDefault ? " [Default]" : ""),
+                    type: "checkbox",
+                    checked: autoUnitSelected === unit,
+                    click() {
+                      unitConversion.autoTarget = unit;
+                      unitConversion.preset = null;
+                      sendMessage(window, "edit-axis", {
+                        legend: legend,
+                        lockedRange: lockedRange,
+                        unitConversion: unitConversion,
+                        filter: filter
+                      });
+                    }
+                  })
+                );
+              });
+              break;
+          }
           let updateRecents = (newUnitConversion: Units.UnitConversionPreset) => {
             let newUnitConversionStr = JSON.stringify(newUnitConversion);
             if (newUnitConversionStr !== JSON.stringify(Units.NoopUnitConversion)) {
@@ -895,66 +957,103 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
               jsonfile.writeFileSync(RECENT_UNITS_FILENAME, recentUnits);
             }
           };
-          editAxisMenu.append(
-            new MenuItem({
-              label: "Edit Units...",
-              click() {
-                createUnitConversionWindow(window, unitConversion, (newUnitConversion) => {
-                  sendMessage(window, "edit-axis", {
-                    legend: legend,
-                    lockedRange: lockedRange,
-                    unitConversion: newUnitConversion,
-                    filter: filter
-                  });
-                  updateRecents(newUnitConversion);
-                });
-              }
-            })
-          );
           let recentUnits: Units.UnitConversionPreset[] = fs.existsSync(RECENT_UNITS_FILENAME)
             ? jsonfile.readFileSync(RECENT_UNITS_FILENAME)
             : [];
           editAxisMenu.append(
             new MenuItem({
-              label: "Recent Presets",
+              label: "Manual Units",
               type: "submenu",
-              enabled: recentUnits.length > 0,
-              submenu: recentUnits.map((preset) => {
-                let fromToText =
-                  preset.from === undefined || preset.to === undefined
-                    ? ""
-                    : preset.from?.replace(/(^\w|\s\w|\/\w)/g, (m) => m.toUpperCase()) +
-                      " \u2192 " +
-                      preset.to?.replace(/(^\w|\s\w|\/\w)/g, (m) => m.toUpperCase());
-                let factorText = preset.factor === 1 ? "" : "x" + preset.factor.toString();
-                let bothPresent = fromToText.length > 0 && factorText.length > 0;
-                return {
-                  label: fromToText + (bothPresent ? ", " : "") + factorText,
+              submenu: [
+                {
+                  label: "Edit Conversion...",
                   click() {
+                    createUnitConversionWindow(
+                      window,
+                      unitConversion.preset ?? Units.NoopUnitConversion,
+                      (newPreset) => {
+                        if (newPreset === null) return;
+                        unitConversion.autoTarget = null;
+                        unitConversion.preset = newPreset;
+                        sendMessage(window, "edit-axis", {
+                          legend: legend,
+                          lockedRange: lockedRange,
+                          unitConversion: unitConversion,
+                          filter: filter
+                        });
+                        updateRecents(newPreset);
+                      }
+                    );
+                  }
+                },
+                {
+                  label: "Recent Presets",
+                  type: "submenu",
+                  enabled: recentUnits.length > 0,
+                  submenu: recentUnits.map((preset) => {
+                    let fromToText =
+                      preset.from === undefined || preset.to === undefined
+                        ? ""
+                        : preset.from?.replace(/(^\w|\s\w|\/\w)/g, (m) => m.toUpperCase()) +
+                          " \u2192 " +
+                          preset.to?.replace(/(^\w|\s\w|\/\w)/g, (m) => m.toUpperCase());
+                    let factorText = preset.factor === 1 ? "" : "x" + preset.factor.toString();
+                    let bothPresent = fromToText.length > 0 && factorText.length > 0;
+                    return {
+                      label: fromToText + (bothPresent ? ", " : "") + factorText,
+                      click() {
+                        unitConversion.autoTarget = null;
+                        unitConversion.preset = preset;
+                        sendMessage(window, "edit-axis", {
+                          legend: legend,
+                          lockedRange: lockedRange,
+                          unitConversion: unitConversion,
+                          filter: filter
+                        });
+                        updateRecents(preset);
+                      }
+                    };
+                  })
+                },
+                {
+                  type: "separator"
+                },
+                {
+                  label: "Disable Automatic Units",
+                  type: "checkbox",
+                  checked: unitConversion.preset !== null,
+                  click() {
+                    unitConversion.autoTarget = null;
+                    if (unitConversion.preset === null) {
+                      unitConversion.preset = Units.NoopUnitConversion;
+                    } else {
+                      unitConversion.preset = null;
+                    }
                     sendMessage(window, "edit-axis", {
                       legend: legend,
                       lockedRange: lockedRange,
-                      unitConversion: preset,
+                      unitConversion: unitConversion,
                       filter: filter
                     });
-                    updateRecents(preset);
                   }
-                };
-              })
-            })
-          );
-          editAxisMenu.append(
-            new MenuItem({
-              label: "Reset Units",
-              enabled: JSON.stringify(unitConversion) !== JSON.stringify(Units.NoopUnitConversion),
-              click() {
-                sendMessage(window, "edit-axis", {
-                  legend: legend,
-                  lockedRange: lockedRange,
-                  unitConversion: Units.NoopUnitConversion,
-                  filter: filter
-                });
-              }
+                },
+                {
+                  label: "Reset Conversion",
+                  enabled:
+                    unitConversion.preset !== null &&
+                    JSON.stringify(unitConversion.preset) !== JSON.stringify(Units.NoopUnitConversion),
+                  click() {
+                    unitConversion.autoTarget = null;
+                    unitConversion.preset = Units.NoopUnitConversion;
+                    sendMessage(window, "edit-axis", {
+                      legend: legend,
+                      lockedRange: lockedRange,
+                      unitConversion: unitConversion,
+                      filter: filter
+                    });
+                  }
+                }
+              ]
             })
           );
           editAxisMenu.append(
@@ -1099,7 +1198,7 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
             title: "Warning",
             message: "Incomplete data for export",
             detail:
-              'Some fields will not be available in the exported data. To save all fields from the server, the "Logging" live mode must be selected with NetworkTables, PathPlanner, or RLOG as the live source. Check the AdvantageScope documentation for details.',
+              'Some fields will not be available in the exported data. To save all fields from the server, the "Logging" live mode must be selected. Check the AdvantageScope documentation for details.',
             buttons: ["Continue", "Cancel"],
             icon: WINDOW_ICON
           })
@@ -1185,17 +1284,12 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
   }
 }
 
-// Send live RLOG heartbeats & PathPlanner pings
+// Send live RLOG heartbeats
 setInterval(() => {
   Object.values(rlogSockets).forEach((socket) => {
     socket.write(RLOG_HEARTBEAT_DATA);
   });
 }, RLOG_HEARTBEAT_DELAY_MS);
-setInterval(() => {
-  Object.values(pathPlannerSockets).forEach((socket) => {
-    socket.write(PATHPLANNER_PING_TEXT + "\n");
-  });
-}, PATHPLANNER_PING_DELAY_MS);
 
 /** Shows a popup to create a new tab on a hub window. */
 function newTabPopup(window: BrowserWindow, rect: ButtonRect) {
@@ -1216,8 +1310,8 @@ function newTabPopup(window: BrowserWindow, rect: ButtonRect) {
     });
   newTabMenu.popup({
     window: window,
-    x: rect.x + rect.width,
-    y: rect.y
+    x: Math.round(rect.x + rect.width),
+    y: Math.round(rect.y)
   });
 }
 
@@ -1631,7 +1725,7 @@ function setupMenu() {
   const isMac = process.platform === "darwin";
   const prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
 
-  const template: (Electron.MenuItemConstructorOptions | Electron.MenuItem)[] = [
+  menuTemplate = [
     {
       role: isMac ? "appMenu" : undefined,
       label: isMac ? "" : "App",
@@ -1680,7 +1774,6 @@ function setupMenu() {
         {
           label: "Use Custom Assets Folder",
           type: "checkbox",
-          checked: prefs.userAssetsFolder !== null,
           async click(item) {
             const isCustom = item.checked;
             let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
@@ -1696,7 +1789,6 @@ function setupMenu() {
             } else {
               prefs.userAssetsFolder = null;
             }
-            item.checked = prefs.userAssetsFolder !== null;
             jsonfile.writeFileSync(PREFS_FILENAME, prefs);
             advantageScopeAssets = loadAssets();
             sendAllPreferences();
@@ -1757,7 +1849,9 @@ function setupMenu() {
                 title: "Select the robot log file(s) to open",
                 message: "If multiple files are selected, timestamps will be aligned automatically",
                 properties: ["openFile", "multiSelections"],
-                filters: [{ name: "Robot logs", extensions: ["rlog", "wpilog", "dslog", "dsevents", "hoot"] }],
+                filters: [
+                  { name: "Robot logs", extensions: ["rlog", "wpilog", "dslog", "dsevents", "hoot", "log", "csv"] }
+                ],
                 defaultPath: getDefaultLogPath()
               })
               .then((files) => {
@@ -1777,7 +1871,9 @@ function setupMenu() {
               .showOpenDialog(window, {
                 title: "Select the robot log file(s) to add to the current log",
                 properties: ["openFile", "multiSelections"],
-                filters: [{ name: "Robot logs", extensions: ["rlog", "wpilog", "dslog", "dsevents", "hoot"] }],
+                filters: [
+                  { name: "Robot logs", extensions: ["rlog", "wpilog", "dslog", "dsevents", "hoot", "log", "csv"] }
+                ],
                 defaultPath: getDefaultLogPath()
               })
               .then((files) => {
@@ -1789,21 +1885,65 @@ function setupMenu() {
         },
         {
           label: "Connect to Robot",
-          accelerator: "CmdOrCtrl+K",
-          click(_, baseWindow) {
-            const window = baseWindow as BrowserWindow | undefined;
-            if (window === undefined || !hubWindows.includes(window)) return;
-            sendMessage(window, "start-live", false);
-          }
+          type: "submenu",
+          submenu: [
+            {
+              label: "Default",
+              accelerator: "CmdOrCtrl+K",
+              click(_, baseWindow) {
+                const window = baseWindow as BrowserWindow | undefined;
+                if (window === undefined || !hubWindows.includes(window)) return;
+                sendMessage(window, "start-live", false);
+              }
+            },
+            { type: "separator" },
+            ...(["nt4", "nt4-akit", "phoenix", "rlog", "ftcdashboard"] as const).map((liveMode: LiveMode) => {
+              let item: Electron.MenuItemConstructorOptions = {
+                label: getLiveModeName(liveMode),
+                click(_, baseWindow) {
+                  const window = baseWindow as BrowserWindow | undefined;
+                  if (window === undefined || !hubWindows.includes(window)) return;
+                  let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
+                  prefs.liveMode = liveMode;
+                  jsonfile.writeFileSync(PREFS_FILENAME, prefs);
+                  sendAllPreferences();
+                  sendMessage(window, "start-live", false);
+                }
+              };
+              return item;
+            })
+          ]
         },
         {
           label: "Connect to Simulator",
-          accelerator: "CmdOrCtrl+Shift+K",
-          click(_, baseWindow) {
-            const window = baseWindow as BrowserWindow | undefined;
-            if (window === undefined || !hubWindows.includes(window)) return;
-            sendMessage(window, "start-live", true);
-          }
+          type: "submenu",
+          submenu: [
+            {
+              label: "Default",
+              accelerator: "CmdOrCtrl+Shift+K",
+              click(_, baseWindow) {
+                const window = baseWindow as BrowserWindow | undefined;
+                if (window === undefined || !hubWindows.includes(window)) return;
+                sendMessage(window, "start-live", true);
+              }
+            },
+            { type: "separator" },
+            ...(["nt4", "nt4-akit", "phoenix", "rlog", "ftcdashboard"] as const).map((liveMode: LiveMode) => {
+              let item: Electron.MenuItemConstructorOptions = {
+                label: getLiveModeName(liveMode),
+                click(_, baseWindow) {
+                  const window = baseWindow as BrowserWindow | undefined;
+                  if (window === undefined || !hubWindows.includes(window)) return;
+                  let prefs: Preferences = jsonfile.readFileSync(PREFS_FILENAME);
+                  prefs.liveMode = liveMode;
+                  jsonfile.writeFileSync(PREFS_FILENAME, prefs);
+                  sendAllPreferences();
+                  sendMessage(window, "start-live", true);
+                }
+              };
+              return item;
+            })
+          ]
         },
         {
           label: "Download Logs...",
@@ -2199,7 +2339,7 @@ function setupMenu() {
     }
   ];
 
-  const menu = Menu.buildFromTemplate(template);
+  const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
 }
 
@@ -2270,13 +2410,11 @@ function createHubWindow(state?: WindowState) {
       if (Number(os.release().split(".")[0]) >= 20) prefs.titleBarStyle = "hiddenInset"; // macOS Big Sur
       break;
     case "win32":
-      // Skip background material on Windows until https://github.com/electron/electron/issues/46753 is fixed
-      //
-      // let releaseSplit = os.release().split(".");
-      // if (Number(releaseSplit[releaseSplit.length - 1]) >= 22621) {
-      //   // Windows 11 22H2
-      //   prefs.backgroundMaterial = "acrylic";
-      // }
+      let releaseSplit = os.release().split(".");
+      if (Number(releaseSplit[releaseSplit.length - 1]) >= 22621) {
+        // Windows 11 22H2
+        prefs.backgroundMaterial = "acrylic";
+      }
 
       prefs.titleBarStyle = "hidden";
       let overlayOptions: TitleBarOverlay = {
@@ -2429,6 +2567,25 @@ function createHubWindow(state?: WindowState) {
           });
       } else if (!isBetaWelcomeComplete()) {
         openBetaWelcome(window);
+      } else if (shouldPromptBetaSurvey()) {
+        dialog
+          .showMessageBox(window, {
+            type: "info",
+            title: "Alert",
+            message: "Share feedback?",
+            detail: `Please take 30 seconds to share your experience using the AdvantageScope ${
+              isAlpha() ? "alpha" : "beta"
+            }. We'll keep this quick.`,
+            buttons: ["Open", "Not Now"],
+            defaultId: 0
+          })
+          .then((result) => {
+            if (result.response === 0) {
+              openBetaSurvey();
+            } else {
+              delayBetaSurvey();
+            }
+          });
       }
     }
   });
@@ -2513,7 +2670,7 @@ function createEditRangeWindow(
 function createUnitConversionWindow(
   parentWindow: Electron.BrowserWindow,
   unitConversion: Units.UnitConversionPreset,
-  callback: (unitConversion: Units.UnitConversionPreset) => void
+  callback: (unitConversion: Units.UnitConversionPreset | null) => void
 ) {
   const unitConversionWindow = new BrowserWindow({
     width: 300,
@@ -2892,8 +3049,9 @@ function openPreferences(parentWindow: Electron.BrowserWindow) {
   }
 
   const width = 400;
-  const rows = 12;
-  const height = rows * 27 + 54;
+  const optionRows = 12;
+  const titleRows = 2;
+  const height = optionRows * 27 + titleRows * 34 + 54;
   prefsWindow = new BrowserWindow({
     width: width,
     height: height,
@@ -3096,6 +3254,7 @@ function openBetaWelcome(parentWindow: Electron.BrowserWindow) {
     port2.on("message", () => {
       betaWelcome.destroy();
       saveBetaWelcomeComplete();
+      shouldPromptBetaSurvey(); // Ensures survey is scheduled
     });
     port2.start();
     betaWelcome.show();
@@ -3199,7 +3358,9 @@ app.whenReady().then(() => {
       x.endsWith(".rlog") ||
       x.endsWith(".dslog") ||
       x.endsWith(".dsevents") ||
-      x.endsWith(".hoot")
+      x.endsWith(".hoot") ||
+      x.endsWith(".log") ||
+      x.endsWith(".csv")
   );
   if (fileArgs.length > 0) {
     firstOpenPath = fileArgs[0];

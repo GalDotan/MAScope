@@ -1,1 +1,0 @@
-MAScope is a customized fork of [AdvantageScope](https://github.com/Mechanical-Advantage/AdvantageScope), built by **FRC Team 5951**, tailored to better suit our team’s workflows and logging standards.
