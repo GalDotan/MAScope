@@ -261,6 +261,36 @@ const Field2dController_Config: SourceListConfig = {
       previewType: "SwerveModuleState[]"
     },
     {
+      key: "vectors",
+      display: "Vectors",
+      symbol: "arrow.up.right",
+      showInTypeName: true,
+      color: "color",
+      sourceTypes: ["Translation2d", "Translation2d[]"],
+      showDocs: true,
+      options: [
+        {
+          key: "color",
+          display: "Color",
+          showInTypeName: false,
+          values: NeonColors
+        },
+        {
+          key: "frame",
+          display: "Frame",
+          showInTypeName: false,
+          values: [
+            { key: "robot", display: "Robot Relative" },
+            { key: "field", display: "Field Relative" }
+          ]
+        }
+      ],
+      initialSelectionOption: "frame",
+      childOf: "robot",
+      previewType: "Translation2d"
+    },
+
+    {
       key: "swerveStatesLegacy",
       display: "Swerve States",
       symbol: "arrow.up.left.and.down.right.and.arrow.up.right.and.down.left",

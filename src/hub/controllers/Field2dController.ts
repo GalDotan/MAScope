@@ -16,6 +16,7 @@ import {
   grabHeatmapData,
   grabPosesAuto,
   grabSwerveStates,
+  grabVectors,
   rotation3dTo2d
 } from "../../shared/geometry";
 import { ALLIANCE_KEYS, getIsRedAlliance } from "../../shared/log/LogUtil";
@@ -351,6 +352,11 @@ export default class Field2dController implements TabController {
         values: SwerveState[];
         color: string;
       }[] = [];
+      let vectors: {
+        values: Translation2d[];
+        color: string;
+        frame: "robot" | "field";
+      }[] = [];
       children.forEach((child) => {
         switch (child.type) {
           case "rotationOverride":
@@ -427,10 +433,27 @@ export default class Field2dController implements TabController {
             });
             break;
           }
+          case "vectors": {
+            if (time !== null) {
+              const values = grabVectors(window.log, child.logKey, child.logType, time!, this.UUID);
+              if (values.length > 0) {
+                const frameRaw = child.options.frame;
+                const frame: "robot" | "field" = frameRaw === "field" || frameRaw === "robot" ? frameRaw : "robot";
+
+                vectors.push({
+                  values,
+                  color: child.options.color,
+                  frame
+                });
+              }
+            }
+            break;
+          }
         }
       });
       visionTargets.reverse();
       swerveStates.reverse();
+      vectors.reverse();
 
       // Apply coordinate system
       if (fieldData !== undefined) {
@@ -461,7 +484,8 @@ export default class Field2dController implements TabController {
             bumperColor:
               source.options.bumpers === "" ? (isRedAlliance ? "#ff0000" : "#0000ff") : source.options.bumpers,
             visionTargets: visionTargets,
-            swerveStates: swerveStates
+            swerveStates: swerveStates,
+            vectors: vectors
           });
           break;
         case "ghost":

@@ -334,6 +334,41 @@ export default class Field2dRenderer implements TabRenderer {
 
               // Draw vision targets
               let robotPos = calcCoordinates(pose.pose.translation);
+
+              // Draw vectors (robot-relative Translation2d)
+              (object.vectors ?? []).forEach((set) => {
+                context.strokeStyle = set.color;
+                context.lineCap = "round";
+                context.lineJoin = "round";
+                context.lineWidth = 1.5 * pixelsPerInch;
+
+                set.values.forEach((vec: Translation2d) => {
+                  // vec is in meters, robot frame (x forward, y left)
+                  const vxInches = Units.convert(vec[0], "meters", "inches");
+                  const vyInches = Units.convert(vec[1], "meters", "inches");
+                  const vectorLength = Math.hypot(vxInches, vyInches) * pixelsPerInch;
+                  if (vectorLength < 1e-3) return;
+
+                  const localAngle = Math.atan2(vyInches, vxInches); // robot frame angle
+                  const vectorRotation = pose.pose.rotation + localAngle;
+
+                  const headLength = pixelsPerInch * 4;
+
+                  const arrowBack = transformPx(robotPos, vectorRotation, [0, 0]);
+                  const arrowFront = transformPx(robotPos, vectorRotation, [vectorLength, 0]);
+                  const arrowLeft = transformPx(robotPos, vectorRotation, [vectorLength - headLength, headLength]);
+                  const arrowRight = transformPx(robotPos, vectorRotation, [vectorLength - headLength, -headLength]);
+
+                  context.beginPath();
+                  context.moveTo(arrowBack[0], arrowBack[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.moveTo(arrowLeft[0], arrowLeft[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.lineTo(arrowRight[0], arrowRight[1]);
+                  context.stroke();
+                });
+              });
+
               object.visionTargets.forEach((target: AnnotatedPose2d) => {
                 context.strokeStyle =
                   target.annotation.visionColor === undefined ? "#00ff00" : target.annotation.visionColor;
@@ -346,12 +381,98 @@ export default class Field2dRenderer implements TabRenderer {
 
               // Draw main object
               drawRobot(pose.pose, object.swerveStates, object.bumperColor);
+
+              // Draw vectors (robot-relative Translation2d)
+              // Draw vectors
+              (object.vectors ?? []).forEach((set) => {
+                context.strokeStyle = set.color;
+                context.lineCap = "round";
+                context.lineJoin = "round";
+                context.lineWidth = 1.5 * pixelsPerInch;
+
+                const frame = set.frame ?? "robot";
+
+                set.values.forEach((vec: Translation2d) => {
+                  const vxInches = Units.convert(vec[0], "meters", "inches");
+                  const vyInches = Units.convert(vec[1], "meters", "inches");
+                  const vectorLength = Math.hypot(vxInches, vyInches) * pixelsPerInch;
+                  if (vectorLength < 1e-3) return;
+
+                  const baseAngle = Math.atan2(vyInches, vxInches); // angle in whatever frame vec is in
+                  let vectorRotation: number;
+
+                  if (frame === "robot") {
+                    // Robot-relative: rotate with robot heading
+                    vectorRotation = pose.pose.rotation + baseAngle;
+                  } else {
+                    // Field-relative: global direction on the field
+                    vectorRotation = baseAngle;
+                  }
+
+                  const headLength = pixelsPerInch * 4;
+
+                  const arrowBack = transformPx(robotPos, vectorRotation, [0, 0]);
+                  const arrowFront = transformPx(robotPos, vectorRotation, [vectorLength, 0]);
+                  const arrowLeft = transformPx(robotPos, vectorRotation, [vectorLength - headLength, headLength]);
+                  const arrowRight = transformPx(robotPos, vectorRotation, [vectorLength - headLength, -headLength]);
+
+                  context.beginPath();
+                  context.moveTo(arrowBack[0], arrowBack[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.moveTo(arrowLeft[0], arrowLeft[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.lineTo(arrowRight[0], arrowRight[1]);
+                  context.stroke();
+                });
+              });
             });
             break;
           case "ghost":
             object.poses.forEach((pose) => {
-              // Draw vision targets
               let robotPos = calcCoordinates(pose.pose.translation);
+
+              // Draw vectors (robot-relative Translation2d)
+              (object.vectors ?? []).forEach((set) => {
+                context.strokeStyle = set.color;
+                context.lineCap = "round";
+                context.lineJoin = "round";
+                context.lineWidth = 1.5 * pixelsPerInch;
+
+                const frame = set.frame ?? "robot";
+
+                set.values.forEach((vec: Translation2d) => {
+                  const vxInches = Units.convert(vec[0], "meters", "inches");
+                  const vyInches = Units.convert(vec[1], "meters", "inches");
+                  const vectorLength = Math.hypot(vxInches, vyInches) * pixelsPerInch;
+                  if (vectorLength < 1e-3) return;
+
+                  const baseAngle = Math.atan2(vyInches, vxInches);
+                  let vectorRotation: number;
+
+                  if (frame === "robot") {
+                    vectorRotation = pose.pose.rotation + baseAngle;
+                  } else {
+                    vectorRotation = baseAngle;
+                  }
+
+                  const headLength = pixelsPerInch * 4;
+
+                  const arrowBack = transformPx(robotPos, vectorRotation, [0, 0]);
+                  const arrowFront = transformPx(robotPos, vectorRotation, [vectorLength, 0]);
+                  const arrowLeft = transformPx(robotPos, vectorRotation, [vectorLength - headLength, headLength]);
+                  const arrowRight = transformPx(robotPos, vectorRotation, [vectorLength - headLength, -headLength]);
+
+                  context.beginPath();
+                  context.moveTo(arrowBack[0], arrowBack[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.moveTo(arrowLeft[0], arrowLeft[1]);
+                  context.lineTo(arrowFront[0], arrowFront[1]);
+                  context.lineTo(arrowRight[0], arrowRight[1]);
+                  context.stroke();
+                });
+              });
+
+              // Draw vision targets
               object.visionTargets.forEach((target: AnnotatedPose2d) => {
                 context.strokeStyle =
                   target.annotation.visionColor === undefined ? "#00ff00" : target.annotation.visionColor;
@@ -444,6 +565,11 @@ export type Field2dRendererCommand_RobotObj = {
     values: SwerveState[];
     color: string;
   }[];
+  vectors?: {
+    values: Translation2d[];
+    color: string;
+    frame: "robot" | "field";
+  }[];
 };
 
 export type Field2dRendererCommand_GhostObj = {
@@ -454,6 +580,11 @@ export type Field2dRendererCommand_GhostObj = {
   swerveStates: {
     values: SwerveState[];
     color: string;
+  }[];
+  vectors?: {
+    values: Translation2d[];
+    color: string;
+    frame: "robot" | "field";
   }[];
 };
 

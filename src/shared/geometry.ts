@@ -691,6 +691,17 @@ export function grabSwerveStates(
   return states;
 }
 
+export function grabVectors(log: Log, key: string, logType: string, timestamp: number, uuid?: string): Translation2d[] {
+  switch (logType) {
+    case "Translation2d":
+      return grabTranslation2d(log, key, timestamp, uuid).map((p) => translation3dTo2d(p.pose.translation));
+    case "Translation2d[]":
+      return grabTranslation2dArray(log, key, timestamp, uuid).map((p) => translation3dTo2d(p.pose.translation));
+    default:
+      return [];
+  }
+}
+
 export function grabChassisSpeeds(log: Log, key: string, timestamp: number, uuid?: string): ChassisSpeeds {
   return {
     vx: getOrDefault(log, key + "/vx", LoggableType.Number, timestamp, 0, uuid),
