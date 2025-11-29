@@ -2346,8 +2346,8 @@ function setupMenu() {
 /** Creates the "About AdvantageScope" window. */
 function createAboutWindow() {
   let detailLines: string[] = [];
-  detailLines.push("Version: " + (app.isPackaged ? app.getVersion() : "Development"));
-  detailLines.push("Distribution: " + (DISTRIBUTION === Distribution.WPILib ? "WPILib" : "FRC 6328"));
+  detailLines.push("Version: " + (app.isPackaged ? app.getVersion() : "MA Development"));
+  detailLines.push("Distribution: " + (DISTRIBUTION === Distribution.WPILib ? "WPILib" : "FRC 5951"));
   detailLines.push("Platform: " + process.platform + "-" + process.arch);
   detailLines.push("Build Date: " + BUILD_DATE);
   detailLines.push("Electron: " + process.versions.electron);
